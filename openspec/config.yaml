@@ -1,0 +1,95 @@
+context:
+  project: UiAutoTest - AI驱动的Web UI自动化测试平台
+  tech_stack:
+    - Java 8 (严格兼容，不可使用Java 9+特性)
+    - Spring Boot 2.7.18 (javax.*命名空间，不是jakarta.*)
+    - Spring Data JPA 2.7.18
+    - Maven 3.6+
+    - Playwright Java 1.40.0
+    - JUnit 5
+    - Lombok 1.18.22
+    - MySQL 8.0+
+
+  critical_constraints:
+    java8_compatibility:
+      - 禁用: var、文本块、List.of、Set.copyOf、Optional.stream等Java 9+特性
+      - 使用: Arrays.asList、Collections.emptyList、new HashSet<>()
+      - Lombok @Builder不包含父类字段 - BaseEntity的字段必须用setter设置
+      - 时间类: java.time.LocalDateTime、java.time.LocalDate
+
+    naming:
+      - javax.persistence.* (不是jakarta.*)
+      - javax.validation.* (不是jakarta.*)
+      - org.springframework.transaction.annotation.Transactional
+
+    api_design:
+      - 只使用GET和POST（不使用PUT/DELETE/PATCH）
+      - GET: 查询，参数通过query string传递
+      - POST: 数据变更，参数通过body传递
+      - 统一返回格式: {code: 200, message: "操作成功", data: {...}, timestamp: ...}
+
+    database_standards:
+      - 所有表必须包含5个标准字段: unique_id(BIGINT自增主键), created_by, updated_by, created_time, updated_time
+      - SQL文件组织: src/main/resources/db/{table.sql(CREATE TABLE), data.sql(INSERT数据)}
+      - table.sql: 只包含DDL，不包含INSERT/CREATE DATABASE/USE
+      - data.sql: 只包含INSERT，不包含CREATE TABLE/DROP/TRUNCATE
+
+    testing:
+      - Service层覆盖率 ≥ 80%, Controller层 ≥ 60%, Repository层 ≥ 70%
+      - Given-When-Then模式
+      - "@SpringBootTest + @MockBean"
+
+    layer_structure:
+      - controller → service → repository → entity
+      - DTO: Request/Response对象
+      - VO: 视图对象
+      - BaseEntity: 所有Entity继承，包含unique_id和4个审计字段
+
+rules:
+  spec:
+    format: 中文Markdown
+    structure:
+      - ## 模块概述
+      - ## 需求列表 (REQ-1, REQ-2...)
+      - ## 功能场景
+      - ## 验收标准 (Given-When-Then)
+      - ## API定义 (接口列表: 请求/响应格式)
+    requirements:
+      - 用户故事格式: 作为{角色}, 我想要{功能}, 以便于{价值}
+      - API定义包含: HTTP方法、路径、请求体、响应体、错误码
+    constraints:
+      - API只使用GET/POST
+      - 必须定义所有查询接口的过滤条件
+      - 必须定义所有操作接口的权限要求
+
+  design:
+    format: 中文Markdown
+    structure:
+      - ## 数据库设计 (表结构、字段说明、索引、外键)
+      - ## 类设计 (Entity、DTO、Service、Repository)
+      - ## 关键业务流程 (时序图/流程图)
+      - ## 依赖关系
+      - ## 配置说明
+    database:
+      - 表必须包含5个标准字段
+      - 索引策略: 查询字段、外键字段、唯一约束
+    entities:
+      - 继承BaseEntity
+      - Lombok: "@Data @Builder @NoArgsConstructor @AllArgsConstructor"
+      - JPA: "@Entity @Table(name=\"xxx\")"
+
+  tasks:
+    format: 中文Markdown
+    structure:
+      - ## Phase 1: 基础功能
+      - ## Phase 2: 业务逻辑
+      - ## Phase 3: 测试验证
+    task_format:
+      - "- [ ] TASK-{Phase}.{序号}: {任务名称}"
+      - 描述: {具体要做的事}
+      - 验收: {如何验证完成}
+    completion_criteria:
+      - 所有业务代码已实现
+      - 所有单元测试已编写并通过
+      - 代码覆盖率达标
+      - mvn test成功

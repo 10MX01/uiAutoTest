@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: ai-script-generation
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/uiaut_test?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    database-platform: org.hibernate.dialect.MySQL8Dialect
+    properties:
+      hibernate:
+        format_sql: true
+
+# Jasypt加密配置
+jasypt:
+  encryptor:
+    algorithm: PBEWithMD5AndDES
+    iv-generator-classname: org.jasypt.iv.NoIvGenerator
+    password: uiaut-test-2024-ai
+
+# AI服务配置
+ai:
+  service:
+    default-timeout: 30000
+    max-retries: 2
+
+# Playwright配置
+playwright:
+  driver:
+    chromium:
+      headless: true
+      timeout: 30000
+
+# 日志配置
+logging:
+  level:
+    com.uiauto.aiscript: DEBUG
+    com.microsoft.playwright: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"

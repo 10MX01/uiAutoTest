@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>密码服务平台-自动化测试</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome - 使用国内 CDN -->
+    <link href="https://cdn.baomitu.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <!-- Chart.js - 使用国内 CDN -->
+    <script src="https://cdn.baomitu.com/chart.js/4.4.8/chart.umd.min.js"></script>
+    <!-- 自定义Tailwind配置 -->
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: '#165DFF',
+              secondary: '#E8F3FF',
+              neutral: '#F5F7FA',
+              dark: '#1D2129',
+              light: '#86909C',
+              success: '#00C48C',
+              warning: '#FF6B00',
+              danger: '#FF4D4F',
+              info: '#4096FF',
+              borderColor: '#E5E7EB',
+              cardBg: '#FFFFFF',
+              cardBorder: '#E5E7EB',
+              cardTextLight: '#86909C',
+              successGreen: '#10b981',
+              warningYellow: '#f59e0b',
+              dangerRed: '#ef4444',
+              linkBlue: '#165DFF'
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+            },
+          }
+        }
+      }
+    </script>
+    <style type="text/tailwindcss">
+      @layer utilities {
+        .content-auto {
+          content-visibility: auto;
+        }
+        .sidebar-item-active {
+          @apply bg-secondary text-primary border-l-4 border-primary;
+        }
+        .card-shadow {
+          @apply shadow-sm hover:shadow-md transition-shadow duration-200;
+        }
+        .btn-primary {
+          @apply bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors duration-200;
+        }
+        .btn-outline {
+          @apply border border-primary text-primary px-4 py-2 rounded-lg hover:bg-secondary transition-colors duration-200;
+        }
+        .table-row-hover {
+          @apply hover:bg-neutral transition-colors duration-200;
+        }
+        .test-card {
+          @apply bg-cardBg rounded-lg p-4 text-dark relative overflow-hidden border border-cardBorder card-shadow;
+        }
+        .progress-fill {
+          @apply h-full rounded-md transition-all duration-500;
+        }
+        .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+        .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+        }
+        .card-hover {
+          transition: all 0.2s ease;
+        }
+        .card-hover:hover {
+          background-color: #F8FAFC;
+          border-color: rgba(64, 150, 255, 0.5);
+        }
+        .card-header {
+          @apply flex items-start justify-between gap-2 mb-3;
+        }
+        .card-body {
+          @apply my-3 flex justify-between items-end;
+        }
+        .progress-container {
+          @apply my-3;
+        }
+        select {
+          padding-right: 2.5rem;
+          appearance: none;
+          background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2386909C' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+          background-position: right 0.5rem center;
+          background-repeat: no-repeat;
+          background-size: 1.5em 1.5em;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
