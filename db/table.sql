@@ -288,3 +288,36 @@ CREATE TABLE IF NOT EXISTS file_management (
     INDEX idx_md5 (file_md5),
     INDEX idx_upload_time (upload_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件管理表';
+
+-- =====================================================
+-- 9. 用户表 (users)
+-- =====================================================
+-- 说明：管理系统用户，支持登录认证和权限管理
+CREATE TABLE IF NOT EXISTS users (
+    -- 标准字段（所有表必须包含）
+    unique_id        BIGINT       PRIMARY KEY  AUTO_INCREMENT  COMMENT '唯一标识ID（自增主键）',
+    created_by       BIGINT       NOT NULL                      COMMENT '创建人ID',
+    updated_by       BIGINT                                    COMMENT '更新人ID',
+    created_time     DATETIME     NOT NULL                      COMMENT '创建时间',
+    updated_time     DATETIME     NOT NULL                      COMMENT '更新时间',
+
+    -- 业务字段
+    username         VARCHAR(50)  NOT NULL                      COMMENT '用户名（登录名）',
+    password         VARCHAR(255) NOT NULL                      COMMENT '密码（BCrypt加密）',
+    real_name        VARCHAR(100) NOT NULL                      COMMENT '真实姓名',
+    email            VARCHAR(100)                               COMMENT '邮箱',
+    phone            VARCHAR(20)                               COMMENT '手机号',
+    role             VARCHAR(20)  NOT NULL DEFAULT 'USER'       COMMENT '角色：ADMIN-管理员, USER-普通用户',
+    status           VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE'      COMMENT '状态：ACTIVE-启用, DISABLED-禁用',
+    last_login_time  DATETIME                                    COMMENT '最后登录时间',
+
+    UNIQUE KEY uk_username (username),
+    INDEX idx_real_name (real_name),
+    INDEX idx_role (role),
+    INDEX idx_status (status)
+) COMMENT='用户表';
+
+-- 初始化默认管理员（密码：admin123）
+INSERT INTO users (unique_id, created_by, username, password, real_name, role, status, created_time, updated_time)
+VALUES (1, 1, 'admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '系统管理员', 'ADMIN', 'ACTIVE', NOW(), NOW())
+ON DUPLICATE KEY UPDATE updated_time = NOW();

@@ -18,8 +18,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.lang.reflect.Type;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+
+import com.google.gson.JsonSyntaxException;
 
 /**
  * 两阶段脚本生成Service实现
@@ -92,7 +95,7 @@ public class TwoPhaseScriptGenerationServiceImpl implements TwoPhaseScriptGenera
             );
 
             // 调用AI服务（60秒超时）
-            String response = llmService.callLLM(config, prompt, config.getTimeoutSeconds()*1000L);
+            String response = llmService.callLLM(config, prompt);
 
             // 从响应中提取纯JSON（去除markdown代码块）
             String extractedJson = extractJsonFromMarkdown(response);
@@ -100,12 +103,17 @@ public class TwoPhaseScriptGenerationServiceImpl implements TwoPhaseScriptGenera
             // 解析响应
             List<TestStepWithSelectors> steps = parseScriptResponse(response);
 
-            // 记录成功日志 - 保存提取后的纯JSON，不是原始响应
+            // 记录成功日志 - 如果提取的JSON为空，使用实际解析后的结果
             long duration = System.currentTimeMillis() - startTime;
+            String outputJson = extractedJson;
+            if (outputJson == null || outputJson.trim().isEmpty()) {
+                outputJson = gson.toJson(steps);
+                log.warn("AI响应提取的JSON为空，使用解析后的结果保存日志");
+            }
             callLogService.logSuccess(
                     "script_generation_from_json",
                     gson.toJson(stepsJson),
-                    extractedJson,  // 保存提取后的纯JSON，不是原始response
+                    outputJson,
                     duration,
                     0,
                     config.getModelName(),
@@ -166,17 +174,33 @@ public class TwoPhaseScriptGenerationServiceImpl implements TwoPhaseScriptGenera
      */
     private List<TestStepWithSelectors> parseScriptResponse(String response) {
         try {
-            log.debug("原始AI响应: {}", response);
+            log.info("【AI原始响应】{}", response);
 
             // 提取纯JSON内容（去除markdown代码块标记）
             String jsonContent = extractJsonFromMarkdown(response);
-            log.debug("提取的JSON内容: {}", jsonContent);
+            log.info("【提取的JSON】{}", jsonContent);
 
+            // 尝试解析为数组
             Type listType = new TypeToken<List<TestStepWithSelectors>>() {}.getType();
-            return gson.fromJson(jsonContent, listType);
+            List<TestStepWithSelectors> result;
+
+            try {
+                result = gson.fromJson(jsonContent, listType);
+            } catch (JsonSyntaxException e) {
+                // 如果解析数组失败，尝试解析为单个对象
+                log.info("【解析】解析为数组失败，尝试解析为单个对象");
+                TestStepWithSelectors singleStep = gson.fromJson(jsonContent, TestStepWithSelectors.class);
+                result = new ArrayList<>();
+                result.add(singleStep);
+                log.info("【解析成功】单个对象转换为数组，共1个步骤");
+            }
+
+            log.info("【解析成功】共{}个步骤", result.size());
+            return result;
         } catch (Exception e) {
-            log.error("解析脚本生成响应失败: {}", response, e);
-            throw new RuntimeException("AI响应格式错误，无法解析为测试脚本");
+            log.error("【解析失败】原始响应: {}", response, e);
+            log.error("【解析失败】错误信息: {}", e.getMessage());
+            throw new RuntimeException("AI响应格式错误，无法解析为测试脚本: " + e.getMessage());
         }
     }
 
@@ -189,44 +213,49 @@ public class TwoPhaseScriptGenerationServiceImpl implements TwoPhaseScriptGenera
      */
     private String extractJsonFromMarkdown(String response) {
         if (response == null || response.isEmpty()) {
+            log.warn("【提取JSON】响应为空");
             return response;
         }
 
         String content = response.trim();
+        log.info("【提取JSON】原始响应长度: {}", content.length());
 
         // 查找第一个代码块开始标记
         int codeBlockStart = content.indexOf("```");
         if (codeBlockStart == -1) {
             // 没有代码块标记，直接返回
-            log.debug("未找到代码块标记，直接返回原始内容");
+            log.info("【提取JSON】未找到代码块标记，直接返回原始内容");
             return content;
         }
 
         // 从代码块开始位置查找换行符
         int firstNewline = content.indexOf('\n', codeBlockStart);
         if (firstNewline == -1) {
-            log.warn("代码块标记后没有换行符");
+            log.warn("【提取JSON】代码块标记后没有换行符");
             return content;
         }
 
         // 查找代码块结束标记（从换行符之后开始查找）
         int codeBlockEnd = content.indexOf("```", firstNewline + 1);
         if (codeBlockEnd == -1) {
-            log.warn("未找到代码块结束标记");
+            log.warn("【提取JSON】未找到代码块结束标记");
             return content;
         }
 
         // 提取代码块内容
         String extracted = content.substring(firstNewline + 1, codeBlockEnd).trim();
+        log.info("【提取JSON】提取代码块内容，长度: {}", extracted.length());
 
         // 去除可能存在的语言标记（如 "json" 或 "JSON"）
         if (extracted.startsWith("json")) {
+            log.info("【提取JSON】检测到 'json' 前缀，去除");
             extracted = extracted.substring(4).trim();
         } else if (extracted.startsWith("JSON")) {
+            log.info("【提取JSON】检测到 'JSON' 前缀，去除");
             extracted = extracted.substring(4).trim();
         }
 
-        log.debug("从代码块中提取JSON，原始长度: {}, 提取后长度: {}", content.length(), extracted.length());
+        log.info("【提取JSON】最终提取的JSON: {}", extracted);
         return extracted;
     }
 }

@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { Auth } from './auth'
 
 // 创建 axios 实例
 const request = axios.create({
@@ -9,7 +10,11 @@ const request = axios.create({
 // 请求拦截器
 request.interceptors.request.use(
   config => {
-    // 可以在这里添加 token 等认证信息
+    // 添加 Token 到请求头
+    const token = Auth.getToken()
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
     return config
   },
   error => {
@@ -33,6 +38,17 @@ request.interceptors.response.use(
   },
   error => {
     console.error('响应错误:', error)
+
+    // 处理401未授权错误
+    if (error.response && error.response.status === 401) {
+      // 清除认证信息
+      Auth.clear()
+      // 跳转到登录页
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+
     // 可以在这里统一处理错误
     return Promise.reject(error)
   }

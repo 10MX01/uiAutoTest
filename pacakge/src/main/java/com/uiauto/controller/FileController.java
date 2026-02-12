@@ -4,6 +4,8 @@ import com.uiauto.common.ApiResponse;
 import com.uiauto.testcase.dto.TestCaseCreateRequest;
 import com.uiauto.testcase.service.TestCaseService;
 import com.uiauto.testcase.repository.ProjectRepository;
+import com.uiauto.testcase.repository.TestCaseDependencyRepository;
+import com.uiauto.testcase.repository.TestCaseRepository;
 import com.uiauto.testcase.entity.ProjectEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +39,8 @@ public class FileController {
 
     private final TestCaseService testCaseService;
     private final ProjectRepository projectRepository;
+    private final TestCaseDependencyRepository dependencyRepository;
+    private final TestCaseRepository testCaseRepository;
 
     /**
      * 下载测试用例导入模板
@@ -165,10 +169,16 @@ public class FileController {
                 return ApiResponse.error(400, "Excel文件中没有有效的测试用例数据");
             }
 
-            // 5. 逐个调用创建方法导入
+            // 5. 第一阶段：创建所有测试用例（暂不处理前置条件），建立用例编号到ID的映射
             int successCount = 0;
             int failCount = 0;
             int skipCount = 0;  // 跳过的数量（用例已存在）
+
+            // 用于存储用例编号到ID的映射（仅限本次导入创建的用例）
+            java.util.Map<String, Long> caseNumberToIdMap = new java.util.HashMap<>();
+
+            // 用于存储需要处理前置条件的用例（用例编号 -> 前置条件字符串）
+            java.util.Map<String, String> pendingPrerequisites = new java.util.HashMap<>();
 
             for (int i = 0; i < testCaseNames.size(); i++) {
                 try {
@@ -186,7 +196,7 @@ public class FileController {
                         continue;
                     }
 
-                    // 构建创建请求
+                    // 第一阶段：创建测试用例时不处理前置条件
                     TestCaseCreateRequest request = TestCaseCreateRequest.builder()
                             .caseNumber(caseNumber)
                             .name(name.trim())
@@ -197,6 +207,7 @@ public class FileController {
                             .priority("P2")
                             .status("NOT_EXECUTED")
                             .automationStatus("MANUAL")
+                            .prerequisiteIds(null)  // 第一阶段不处理前置条件
                             .build();
 
                     // 调用创建方法
@@ -204,12 +215,46 @@ public class FileController {
                     log.info("成功导入第{}行测试用例，ID: {}, 用例编号: {}, 名称: {}", i + 2, id, caseNumber, name);
                     successCount++;
 
+                    // 记录用例编号到ID的映射
+                    if (caseNumber != null && !caseNumber.trim().isEmpty()) {
+                        caseNumberToIdMap.put(caseNumber.trim(), id);
+                    }
+
+                    // 如果有前置条件，记录下来等待第二阶段处理
+                    if (prerequisite != null && !prerequisite.trim().isEmpty()) {
+                        pendingPrerequisites.put(caseNumber != null ? caseNumber.trim() : String.valueOf(id), prerequisite.trim());
+                    }
+
                 } catch (RuntimeException e) {
                     String errorMsg = e.getMessage();
                     // 判断是否是"用例编号已存在"的错误
                     if (errorMsg != null && errorMsg.contains("在该项目中已存在")) {
                         log.info("第{}行：用例编号已存在，跳过。错误信息: {}", i + 2, errorMsg);
                         skipCount++;
+
+                        // 即使跳过，如果用例已存在，也需要查询其ID以便处理前置条件
+                        String existingCaseNumber = caseNumbers != null && i < caseNumbers.size() ? caseNumbers.get(i) : null;
+                        String prerequisite = prerequisites != null && i < prerequisites.size() ? prerequisites.get(i) : null;
+
+                        if (existingCaseNumber != null && !existingCaseNumber.trim().isEmpty()) {
+                            try {
+                                // 查询已存在的测试用例ID
+                                java.util.Optional<com.uiauto.testcase.entity.TestCaseEntity> existingTestCase =
+                                        testCaseRepository.findByCaseNumberAndProjectId(existingCaseNumber.trim(), projectId);
+                                if (existingTestCase.isPresent()) {
+                                    Long existingId = existingTestCase.get().getUniqueId();
+                                    caseNumberToIdMap.put(existingCaseNumber.trim(), existingId);
+                                    log.info("记录已存在的用例编号到ID映射: {} -> {}", existingCaseNumber.trim(), existingId);
+
+                                    // 如果有前置条件，也记录下来
+                                    if (prerequisite != null && !prerequisite.trim().isEmpty()) {
+                                        pendingPrerequisites.put(existingCaseNumber.trim(), prerequisite.trim());
+                                    }
+                                }
+                            } catch (Exception ex) {
+                                log.warn("无法查询已存在的测试用例: {}", ex.getMessage());
+                            }
+                        }
                     } else {
                         log.error("导入第{}行测试用例失败: {}", i + 2, errorMsg, e);
                         failCount++;
@@ -220,7 +265,85 @@ public class FileController {
                 }
             }
 
-            // 6. 返回导入结果
+            // 6. 第二阶段：处理前置条件关联
+            log.info("开始处理前置条件关联，待处理数量: {}", pendingPrerequisites.size());
+            int prerequisiteProcessCount = 0;
+            int prerequisiteFailCount = 0;
+
+            for (java.util.Map.Entry<String, String> entry : pendingPrerequisites.entrySet()) {
+                String caseNumber = entry.getKey();
+                String prerequisiteStr = entry.getValue();
+
+                try {
+                    // 查找当前测试用例的ID
+                    Long testCaseId = caseNumberToIdMap.get(caseNumber);
+                    if (testCaseId == null) {
+                        log.warn("无法找到用例编号[{}]对应的ID，跳过前置条件处理", caseNumber);
+                        prerequisiteFailCount++;
+                        continue;
+                    }
+
+                    // 解析前置条件字符串，支持多种分隔符：逗号、分号、换行
+                    String[] prereqNumbers = prerequisiteStr.split("[,;\\n\\r]+");
+                    java.util.List<Long> prerequisiteIds = new java.util.ArrayList<>();
+
+                    for (String prereqNumber : prereqNumbers) {
+                        String trimmedNumber = prereqNumber.trim();
+                        if (trimmedNumber.isEmpty()) {
+                            continue;
+                        }
+
+                        // 查找前置用例的ID
+                        Long prereqId = caseNumberToIdMap.get(trimmedNumber);
+                        if (prereqId != null) {
+                            // 优先使用本次导入的用例
+                            prerequisiteIds.add(prereqId);
+                            log.info("找到前置用例（本次导入）：{} -> ID: {}", trimmedNumber, prereqId);
+                        } else {
+                            // 如果本次导入中没有，尝试从数据库查询已存在的用例
+                            try {
+                                java.util.Optional<com.uiauto.testcase.entity.TestCaseEntity> existingTestCase =
+                                        testCaseRepository.findByCaseNumberAndProjectId(trimmedNumber, projectId);
+                                if (existingTestCase.isPresent()) {
+                                    prereqId = existingTestCase.get().getUniqueId();
+                                    prerequisiteIds.add(prereqId);
+                                    log.info("找到前置用例（数据库已存在）：{} -> ID: {}", trimmedNumber, prereqId);
+                                } else {
+                                    log.warn("未找到前置用例编号[{}]对应的ID，该用例不存在", trimmedNumber);
+                                }
+                            } catch (Exception e) {
+                                log.warn("查询前置用例[{}]失败: {}", trimmedNumber, e.getMessage());
+                            }
+                        }
+                    }
+
+                    // 如果有有效的前置条件ID，保存到数据库
+                    if (!prerequisiteIds.isEmpty()) {
+                        for (Long prereqId : prerequisiteIds) {
+                            com.uiauto.testcase.entity.TestCaseDependencyEntity dependency =
+                                    com.uiauto.testcase.entity.TestCaseDependencyEntity.builder()
+                                            .testCaseId(testCaseId)
+                                            .prerequisiteId(prereqId)
+                                            .dependencyType("HARD")
+                                            .build();
+                            dependency.setCreatedBy(1L);
+                            dependency.setUpdatedBy(1L);
+
+                            dependencyRepository.save(dependency);
+                            log.info("保存依赖关系: 测试用例ID {} -> 前置用例ID {}", testCaseId, prereqId);
+                        }
+                        prerequisiteProcessCount++;
+                    }
+
+                } catch (Exception e) {
+                    log.error("处理用例[{}]的前置条件失败: {}", caseNumber, e.getMessage(), e);
+                    prerequisiteFailCount++;
+                }
+            }
+
+            log.info("前置条件处理完成，成功处理{}个，失败{}个", prerequisiteProcessCount, prerequisiteFailCount);
+
+            // 7. 返回导入结果
             // 查询项目名称
             String projectName = "项目[" + projectId + "]";
             try {
@@ -239,6 +362,9 @@ public class FileController {
             }
             if (failCount > 0) {
                 message.append(String.format("，失败%d条", failCount));
+            }
+            if (prerequisiteProcessCount > 0) {
+                message.append(String.format("，处理前置条件%d条", prerequisiteProcessCount));
             }
             message.append(String.format("到项目[%s]", projectName));
 

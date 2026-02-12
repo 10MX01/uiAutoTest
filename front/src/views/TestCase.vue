@@ -241,6 +241,21 @@
               </button>
             </div>
           </div>
+
+          <!-- 导入进度条 -->
+          <div v-if="importing" class="mt-4">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm text-light">正在导入中...</span>
+              <span class="text-sm font-medium text-primary">{{ importProgress }}%</span>
+            </div>
+            <div class="w-full bg-neutral rounded-full h-2 overflow-hidden">
+              <div
+                class="bg-primary h-2 transition-all duration-300 ease-out"
+                :style="{ width: importProgress + '%' }"
+              ></div>
+            </div>
+            <p class="text-xs text-light mt-2">{{ currentImportStep }}</p>
+          </div>
         </div>
 
         <div class="flex justify-end gap-3 mt-6">
@@ -509,6 +524,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { getTestCases, deleteTestCase, executeTestCase, executeAllTestCases, importTestCases, getTestCaseDetail, getTestCasesGroupedByProject, createTestCase } from '@/api/testcase'
 import { getProjects } from '@/api/project'
+import { getExecutors } from '@/api/auth'
 import MessageBox from '@/utils/messageBox'
 
 const route = useRoute()
@@ -524,6 +540,8 @@ const currentProjectName = ref('')
 // 导入相关
 const showImportModal = ref(false)
 const importing = ref(false)
+const importProgress = ref(0)
+const currentImportStep = ref('')
 const fileList = ref([])
 const dragOver = ref(false)
 const fileInput = ref(null)
@@ -571,12 +589,21 @@ const getDropdownStyle = (rowIndex) => {
 const fileTypes = ['xlsx', 'xls']
 const maxSize = 10 * 1024 * 1024 // 10MB
 
-// 执行人列表（模拟数据，实际应从用户表获取）
-const executors = ref([
-  { id: 1, name: '系统管理员' },
-  { id: 2, name: '测试工程师A' },
-  { id: 3, name: '测试工程师B' }
-])
+// 执行人列表
+const executors = ref([])
+
+// 加载执行人列表
+const loadExecutors = async () => {
+  try {
+    const data = await getExecutors()
+    executors.value = data.map(user => ({
+      id: user.uniqueId,
+      name: user.realName
+    }))
+  } catch (error) {
+    console.error('加载执行人列表失败:', error)
+  }
+}
 
 const filters = ref({
   status: '',
@@ -826,6 +853,8 @@ const closeImportModal = () => {
   fileList.value = []
   selectedProjectId.value = ''
   dragOver.value = false
+  importProgress.value = 0
+  currentImportStep.value = ''
 }
 
 // 触发文件选择
@@ -903,13 +932,51 @@ const handleImport = async () => {
   }
 
   importing.value = true
+  importProgress.value = 0
+  currentImportStep.value = '正在准备导入...'
+
+  // 模拟进度更新
+  const progressSteps = [
+    { progress: 10, step: '正在读取Excel文件...' },
+    { progress: 20, step: '正在解析测试用例数据...' },
+    { progress: 30, step: '正在调用AI解析测试步骤...' },
+    { progress: 50, step: 'AI正在生成测试用例脚本...' },
+    { progress: 70, step: '正在保存测试用例到数据库...' },
+    { progress: 90, step: '正在处理前置条件关联...' },
+    { progress: 95, step: '正在完成导入...' }
+  ]
+
+  let stepIndex = 0
+  const progressInterval = setInterval(() => {
+    if (stepIndex < progressSteps.length && importProgress.value < 95) {
+      importProgress.value = progressSteps[stepIndex].progress
+      currentImportStep.value = progressSteps[stepIndex].step
+      stepIndex++
+    }
+  }, 2000) // 每2秒更新一次进度
+
   try {
     const result = await importTestCases(fileList.value[0], selectedProjectId.value)
-    MessageBox.success(result || '导入成功！')
-    closeImportModal()
+
+    // 完成导入
+    clearInterval(progressInterval)
+    importProgress.value = 100
+    currentImportStep.value = '导入完成！'
+
+    setTimeout(() => {
+      MessageBox.success(result || '导入成功！')
+      closeImportModal()
+      importProgress.value = 0
+      currentImportStep.value = ''
+    }, 500)
+
     // 刷新列表
     await fetchTestCases()
   } catch (error) {
+    clearInterval(progressInterval)
+    importProgress.value = 0
+    currentImportStep.value = ''
+
     console.error('导入失败:', error)
     // 显示详细错误信息
     const errorMsg = error.response?.data?.message || error.message || '未知错误'
@@ -943,6 +1010,7 @@ const handleClickOutside = (event) => {
 onMounted(async () => {
   await initCurrentProject()
   fetchTestCases()
+  loadExecutors()
   // 添加全局点击监听
   document.addEventListener('click', handleClickOutside)
 })

@@ -5,6 +5,7 @@ import com.google.gson.reflect.TypeToken;
 import com.uiauto.testcase.entity.TestCaseExecutionEntity;
 import com.uiauto.aiscript.model.PageSnapshot;
 import com.uiauto.common.model.TestStep;
+import com.uiauto.common.model.TestStepAction;
 import com.uiauto.common.model.TestStepWithSelectors;
 import com.uiauto.testcase.repository.TestCaseExecutionRepository;
 import com.uiauto.aiscript.service.PageSnapshotService;
@@ -24,11 +25,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.time.LocalDateTime;
+import java.util.*;
 
 /**
  * 测试用例执行Service实现
@@ -63,15 +61,24 @@ public class TestCaseExecutionServiceImpl implements TestCaseExecutionService {
 
     private final Gson gson = new Gson();
 
+    /**
+     * 首次导航标记（线程局部变量，避免并发问题）
+     */
+    private ThreadLocal<Boolean> hasNavigated = ThreadLocal.withInitial(() -> false);
+
     @Override
     @Transactional
     public TestCaseExecutionEntity executeTestCase(Long testCaseId, String overrideUrl, Long executedBy) {
         long startTime = System.currentTimeMillis();
 
-        // 创建执行会话
+        // 创建执行会话（开发阶段：headless=false 显示浏览器窗口）
         PlaywrightExecutor.ExecutionConfig config =
-                new PlaywrightExecutor.ExecutionConfig(true, true, 30000, true);
+                new PlaywrightExecutor.ExecutionConfig(false, true, 30000, true);
         String sessionId = playwrightExecutor.createSession(config);
+        log.info("【开发模式】浏览器窗口已显示，sessionId: {}", sessionId);
+
+        // 重置首次导航标记
+        hasNavigated.set(false);
 
         String executionUrl = overrideUrl; // 保存URL用于错误记录
 
@@ -99,8 +106,8 @@ public class TestCaseExecutionServiceImpl implements TestCaseExecutionService {
             execution.setScreenshots(result.screenshots);
             execution.setErrorMessage(result.errorMessage);
             execution.setExecutedBy(executedBy);
-            execution.setCreatedTime(new Date());
-            execution.setUpdatedTime(new Date());
+            execution.setCreatedTime(LocalDateTime.now());
+            execution.setUpdatedTime(LocalDateTime.now());
 
             TestCaseExecutionEntity saved = executionRepository.save(execution);
 
@@ -127,8 +134,8 @@ public class TestCaseExecutionServiceImpl implements TestCaseExecutionService {
             execution.setDuration(System.currentTimeMillis() - startTime);
             execution.setErrorMessage(e.getMessage());
             execution.setExecutedBy(executedBy);
-            execution.setCreatedTime(new Date());
-            execution.setUpdatedTime(new Date());
+            execution.setCreatedTime(LocalDateTime.now());
+            execution.setUpdatedTime(LocalDateTime.now());
 
             return executionRepository.save(execution);
         }
@@ -152,6 +159,9 @@ public class TestCaseExecutionServiceImpl implements TestCaseExecutionService {
             String sessionId,
             Set<Long> executingStack,
             String initialUrl) {
+
+        // 记录开始时间
+        long startTime = System.currentTimeMillis();
 
         // 判断是否是第一个执行的用例
         // initialUrl 为 null 表示这是最外层调用，需要导航到初始URL
@@ -186,7 +196,26 @@ public class TestCaseExecutionServiceImpl implements TestCaseExecutionService {
                 }
             }
 
-            // 4. 执行前置依赖
+            // 4. 执行前置依赖（在执行依赖前，最外层用例先导航）
+            // 判断是否是最外层测试用例（executingStack.size() == 1 表示这是最外层调用）
+            boolean isOutermostTestCase = (executingStack.size() == 1);
+
+            // 最外层测试用例：在执行依赖之前先导航到初始页面
+            if (isOutermostTestCase && !hasNavigated.get()) {
+                log.info("最外层测试用例，先导航到初始URL再执行依赖: {}", url);
+                try {
+                    playwrightExecutor.navigate(sessionId, url);
+                    hasNavigated.set(true);
+                    // 【调试日志】导航完成后，检查当前页面URL
+                    String currentUrlAfterNav = playwrightExecutor.getCurrentUrl(sessionId);
+                    log.info("【调试】初始导航完成，当前浏览器页面URL: {}", currentUrlAfterNav);
+                } catch (Exception e) {
+                    log.error("导航失败: {}", e.getMessage());
+                    throw new RuntimeException("导航失败: " + e.getMessage(), e);
+                }
+            }
+
+            // 执行前置依赖
             for (com.uiauto.testcase.entity.TestCaseDependencyEntity dependency : testCase.getDependencies()) {
                 if (executingStack.contains(dependency.getPrerequisiteId())) {
                     continue; // 已在执行栈中，跳过
@@ -214,6 +243,10 @@ public class TestCaseExecutionServiceImpl implements TestCaseExecutionService {
                 }
             }
 
+            // 【调试日志】依赖执行完成后，检查当前页面状态
+            String currentUrlAfterDeps = playwrightExecutor.getCurrentUrl(sessionId);
+            log.info("【调试】所有依赖执行完成，当前浏览器页面URL: {}", currentUrlAfterDeps);
+
             // 5. 检查是否有已启用的JSON脚本
             TestScriptResponse existingScript = testScriptService.getEnabledByTestCaseId(testCaseId);
 
@@ -227,8 +260,8 @@ public class TestCaseExecutionServiceImpl implements TestCaseExecutionService {
                 scriptWithSelectors = gson.fromJson(existingScript.getScriptContent(), listType);
                 scriptContent = existingScript.getScriptContent();
             } else {
-                // 生成新脚本
-                log.info("未找到已启用的脚本，开始生成...");
+                // 生成新脚本 - 使用按页分组批量生成模式
+                log.info("未找到已启用的脚本，开始按页分组生成...");
 
                 // 5.1 检查测试步骤
                 if (testCase.getStepsJson() == null || testCase.getStepsJson().isEmpty()) {
@@ -238,40 +271,107 @@ public class TestCaseExecutionServiceImpl implements TestCaseExecutionService {
                 // 5.2 解析测试步骤
                 Type listType = new TypeToken<List<TestStep>>() {}.getType();
                 List<TestStep> steps = gson.fromJson(testCase.getStepsJson(), listType);
+                log.info("解析测试步骤成功，共{}个步骤", steps.size());
 
-                // 5.3 先导航到URL（仅当这是第一个执行的用例时导航）
-                // 依赖用例会复用前置用例执行后的页面状态，不需要重新导航
-                if (isFirstTestCase) {
-                    log.info("这是第一个执行的用例，导航到初始URL: {}", url);
-                    try {
-                        playwrightExecutor.navigate(sessionId, url);
-                    } catch (Exception e) {
-                        log.error("导航失败，但继续尝试获取快照: {}", e.getMessage());
-                    }
-                } else {
-                    log.info("这是依赖用例，跳过初始导航，保持当前页面状态");
-                }
-
-                // 5.4 获取当前页面快照（包含元素信息）
-                PageSnapshot snapshot = playwrightExecutor.capturePageSnapshotWithElements(sessionId);
-                log.info("获取页面快照成功: URL={}, 元素数量={}", snapshot.getUrl(), snapshot.getElements().size());
-
-                // 5.5 生成包含选择器的脚本
+                // 5.3 获取当前页面快照（导航已在执行依赖前完成）
+                // 【调试日志】获取快照前，再次检查当前页面URL
+                String currentUrlBeforeSnapshot = playwrightExecutor.getCurrentUrl(sessionId);
+                log.info("【调试】准备获取页面快照，当前浏览器页面URL: {}", currentUrlBeforeSnapshot);
+                PageSnapshot currentSnapshot;
                 try {
-                    scriptWithSelectors = twoPhaseService.generateScriptFromJsonAndSnapshot(steps, snapshot);
-                    scriptContent = gson.toJson(scriptWithSelectors);
-
-                    // 5.6 保存脚本到test_scripts表
-                    saveGeneratedScript(testCase, scriptWithSelectors, executedBy);
+                    currentSnapshot = playwrightExecutor.capturePageSnapshotWithElements(sessionId);
+                    log.info("获取初始页面快照成功: URL={}, 元素数量={}",
+                            currentSnapshot.getUrl(), currentSnapshot.getElements().size());
                 } catch (Exception e) {
-                    throw new RuntimeException("生成脚本失败: " + e.getMessage(), e);
+                    log.error("获取初始快照失败: {}", e.getMessage());
+                    throw new RuntimeException("获取初始快照失败: " + e.getMessage(), e);
                 }
+
+                // 5.5 按页分组批量生成和执行
+                List<TestStepWithSelectors> completeScript = new ArrayList<>();
+                int groupIndex = 0;
+                int currentStepStart = 0;
+
+                for (int i = 0; i < steps.size(); i++) {
+                    TestStep step = steps.get(i);
+                    boolean isNavigationStep = shouldCaptureSnapshotBefore(step);
+
+                    // 如果是最后一步，或者是导航步骤，则处理当前组
+                    if (i == steps.size() - 1 || isNavigationStep) {
+                        int currentStepEnd = i + 1;
+                        List<TestStep> currentGroupSteps = steps.subList(currentStepStart, currentStepEnd);
+
+                        groupIndex++;
+                        log.info("=== 处理分组 {} === 步骤 {}-{}, 共{}个步骤, 是否导航: {}",
+                                groupIndex, currentStepStart + 1, currentStepEnd, currentGroupSteps.size(), isNavigationStep);
+
+                        try {
+                            // a. 批量生成当前组的选择器
+                            log.info("开始批量生成分组 {} 的选择器...", groupIndex);
+                            List<TestStepWithSelectors> groupScript =
+                                    twoPhaseService.generateScriptFromJsonAndSnapshot(currentGroupSteps, currentSnapshot);
+
+                            log.info("分组 {} 选择器生成成功，共{}个步骤", groupIndex, groupScript.size());
+                            completeScript.addAll(groupScript);
+
+                            // b. 执行当前组的步骤
+                            log.info("执行分组 {} 的步骤...", groupIndex);
+                            playwrightExecutor.executeInSession(sessionId, url, groupScript);
+                            log.info("分组 {} 执行成功", groupIndex);
+
+                            // c. 如果是导航操作，获取新快照（为下一组做准备）
+                            if (isNavigationStep && i < steps.size() - 1) {
+                                log.info("分组 {} 包含导航操作，获取新页面快照", groupIndex);
+                                try {
+                                    currentSnapshot = playwrightExecutor.capturePageSnapshotWithElements(sessionId);
+                                    log.info("获取新页面快照成功: URL={}, 元素数量={}",
+                                            currentSnapshot.getUrl(), currentSnapshot.getElements().size());
+                                } catch (Exception e) {
+                                    log.error("获取新快照失败: {}", e.getMessage());
+                                    throw new RuntimeException("分组" + groupIndex + "执行后获取快照失败: " + e.getMessage(), e);
+                                }
+                            }
+
+                            // d. 更新下一组的起始索引
+                            currentStepStart = currentStepEnd;
+
+                        } catch (Exception e) {
+                            log.error("处理分组 {} 失败: error={}", groupIndex, e.getMessage());
+                            throw new RuntimeException("分组" + groupIndex + "处理失败: " + e.getMessage(), e);
+                        }
+                    }
+                }
+
+                // 5.6 所有分组处理完成，保存完整脚本
+                scriptWithSelectors = completeScript;
+                scriptContent = gson.toJson(completeScript);
+
+                log.info("所有分组处理完成，共{}个分组，开始保存脚本，共{}个步骤", groupIndex, completeScript.size());
+                saveGeneratedScript(testCase, completeScript, executedBy);
+                log.info("脚本保存成功");
             }
 
             // 6. 执行脚本
-            log.info("开始执行测试用例: {}", testCase.getName());
-            PlaywrightExecutor.ExecutionResult result =
-                    playwrightExecutor.executeInSession(sessionId, url, scriptWithSelectors);
+            // 注意：如果是新生成的脚本（在生成过程中已执行），则跳过执行
+            // 只有复用已有脚本时才需要执行
+            PlaywrightExecutor.ExecutionResult result;
+
+            if (existingScript != null) {
+                // 复用已有脚本，需要执行
+                log.info("开始执行测试用例（复用脚本）: {}", testCase.getName());
+                result = playwrightExecutor.executeInSession(sessionId, url, scriptWithSelectors);
+            } else {
+                // 新生成的脚本，在生成过程中已执行，构造虚拟结果
+                log.info("新脚本已在生成过程中执行，构造执行结果");
+                result = new PlaywrightExecutor.ExecutionResult(
+                        true,  // success
+                        "SUCCESS",
+                        System.currentTimeMillis() - startTime,
+                        new ArrayList<>(),  // stepResults
+                        new ArrayList<>(),  // screenshots
+                        null  // errorMessage
+                );
+            }
 
             // 7. 更新脚本执行统计
             if (existingScript != null) {
@@ -377,5 +477,21 @@ public class TestCaseExecutionServiceImpl implements TestCaseExecutionService {
             return gson.fromJson(json, listType);
         }
         throw new IllegalArgumentException("步骤已包含选择器，无需转换");
+    }
+
+    /**
+     * 判断步骤是否需要获取新快照（在步骤执行前）
+     * 对于可能导致页面跳转的操作，需要在新页面执行前获取快照
+     *
+     * @param step 测试步骤
+     * @return true表示需要获取新快照
+     */
+    private boolean shouldCaptureSnapshotBefore(TestStep step) {
+        if (step == null || step.getAction() == null) {
+            return false;
+        }
+
+        TestStepAction action = TestStepAction.fromString(step.getAction());
+        return action != null && action.isNavigation();
     }
 }

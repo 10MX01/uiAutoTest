@@ -35,4 +35,16 @@ public class ProjectUpdateRequest {
     @NotBlank(message = "项目代码不能为空")
     @Size(max = 50, message = "项目代码长度不能超过50个字符")
     private String code;
+
+    /**
+     * 目标URL（测试环境地址）
+     */
+    @Size(max = 500, message = "目标URL长度不能超过500个字符")
+    private String targetUrl;
+
+    /**
+     * 基础URL（可选）
+     */
+    @Size(max = 500, message = "基础URL长度不能超过500个字符")
+    private String baseUrl;
 }

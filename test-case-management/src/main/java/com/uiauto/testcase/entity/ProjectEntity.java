@@ -3,11 +3,8 @@ package com.uiauto.testcase.entity;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.uiauto.common.BaseEntity;
 import javax.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.NoArgsConstructor;
+
+import lombok.*;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -18,8 +15,10 @@ import java.util.Set;
  */
 @Entity
 @Table(name = "projects")
-@Data
-@EqualsAndHashCode(callSuper = true)
+@Getter
+@Setter
+@EqualsAndHashCode(callSuper = true, exclude = {"testCases"})
+@ToString(callSuper = true, exclude = {"testCases"})
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -60,7 +59,7 @@ public class ProjectEntity extends BaseEntity {
      * 关联的测试用例（一对多）
      */
     @OneToMany(mappedBy = "project", cascade = CascadeType.ALL)
-    @JsonIgnore
+    @com.fasterxml.jackson.annotation.JsonManagedReference
     @Builder.Default
     private Set<TestCaseEntity> testCases = new HashSet<>();
 }

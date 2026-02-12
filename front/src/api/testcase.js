@@ -56,10 +56,14 @@ export function deleteTestCase(id) {
 /**
  * 执行测试用例
  */
-export function executeTestCase(id) {
+export function executeTestCase(id, overrideUrl) {
   return request({
-    url: `/test-cases/${id}/execute`,
-    method: 'post'
+    url: '/executions/execute',
+    method: 'post',
+    data: {
+      testCaseId: id,
+      overrideUrl: overrideUrl || null
+    }
   })
 }
 
@@ -86,7 +90,8 @@ export function importTestCases(file, projectId) {
     data: formData,
     headers: {
       'Content-Type': 'multipart/form-data'
-    }
+    },
+    timeout: 300000 // 导入接口单独设置5分钟超时
   })
 }
 

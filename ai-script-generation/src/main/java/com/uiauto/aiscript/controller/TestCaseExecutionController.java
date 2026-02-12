@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/executions")
+@RequestMapping("/executions")
 public class TestCaseExecutionController {
 
     @Autowired

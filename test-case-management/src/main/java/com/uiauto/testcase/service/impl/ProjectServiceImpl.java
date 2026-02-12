@@ -41,6 +41,8 @@ public class ProjectServiceImpl implements ProjectService {
                 .name(request.getName())
                 .description(request.getDescription())
                 .code(request.getCode())
+                .targetUrl(request.getTargetUrl())
+                .baseUrl(request.getBaseUrl())
                 .build();
 
         // 设置审计字段
@@ -74,6 +76,8 @@ public class ProjectServiceImpl implements ProjectService {
         entity.setName(request.getName());
         entity.setDescription(request.getDescription());
         entity.setCode(request.getCode());
+        entity.setTargetUrl(request.getTargetUrl());
+        entity.setBaseUrl(request.getBaseUrl());
         entity.setUpdatedBy(1L); // TODO: 从当前登录用户获取
 
         // 4. 保存更新
@@ -141,6 +145,8 @@ public class ProjectServiceImpl implements ProjectService {
                 .name(entity.getName())
                 .description(entity.getDescription())
                 .code(entity.getCode())
+                .targetUrl(entity.getTargetUrl())
+                .baseUrl(entity.getBaseUrl())
                 .createdBy(entity.getCreatedBy())
                 .updatedBy(entity.getUpdatedBy())
                 .createdTime(entity.getCreatedTime())

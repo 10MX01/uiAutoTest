@@ -1,6 +1,7 @@
 package com.uiauto.testcase.entity;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.uiauto.common.BaseEntity;
 import lombok.Data;
 
 import javax.persistence.*;
@@ -12,13 +13,7 @@ import java.util.Date;
 @Data
 @Entity
 @Table(name = "test_case_executions")
-public class TestCaseExecutionEntity {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "unique_id")
-    private Long uniqueId;
-
+public class TestCaseExecutionEntity extends BaseEntity {
     /**
      * 测试用例ID
      */
@@ -79,17 +74,4 @@ public class TestCaseExecutionEntity {
     @Column(name = "executed_by")
     private Long executedBy;
 
-    /**
-     * 创建时间（执行时间）
-     */
-    @Column(name = "created_time", nullable = false)
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
-    private Date createdTime;
-
-    /**
-     * 更新时间
-     */
-    @Column(name = "updated_time", nullable = false)
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
-    private Date updatedTime;
 }

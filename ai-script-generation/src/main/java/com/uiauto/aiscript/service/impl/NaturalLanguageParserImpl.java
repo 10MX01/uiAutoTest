@@ -61,7 +61,7 @@ public class NaturalLanguageParserImpl implements NaturalLanguageParser {
             String prompt = buildPrompt(templateOpt.get().getPromptContent(), stepsText);
 
             // 调用AI服务（30秒超时）
-            String response = llmService.callLLM(config, prompt, 60000L);
+            String response = llmService.callLLM(config, prompt);
 
             // 解析响应
             List<TestStep> steps = parseResponse(response);

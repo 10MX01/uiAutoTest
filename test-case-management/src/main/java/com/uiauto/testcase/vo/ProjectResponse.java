@@ -38,6 +38,16 @@ public class ProjectResponse {
     private String code;
 
     /**
+     * 目标URL（测试环境地址）
+     */
+    private String targetUrl;
+
+    /**
+     * 基础URL（可选）
+     */
+    private String baseUrl;
+
+    /**
      * 创建人ID
      */
     private Long createdBy;

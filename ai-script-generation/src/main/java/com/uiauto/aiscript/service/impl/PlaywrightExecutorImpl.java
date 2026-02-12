@@ -6,6 +6,7 @@ import com.microsoft.playwright.options.WaitUntilState;
 import com.uiauto.aiscript.model.InteractiveElement;
 import com.uiauto.aiscript.model.PageSnapshot;
 import com.uiauto.common.model.TestStepWithSelectors;
+import com.uiauto.common.model.VariableResolver;
 import com.uiauto.aiscript.service.PlaywrightExecutor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,7 @@ public class PlaywrightExecutorImpl implements PlaywrightExecutor {
         ExecutionConfig config;
         boolean isFirstNavigation = true;
         String baseUrl;  // 保存baseURL，用于处理相对路径
+        VariableResolver variableResolver = new VariableResolver();  // 变量解析器
     }
 
     @Override
@@ -103,7 +105,7 @@ public class PlaywrightExecutorImpl implements PlaywrightExecutor {
 
             // 执行每个测试步骤
             for (TestStepWithSelectors step : steps) {
-                StepExecutionResult stepResult = executeStep(session.page, step, session.config, session.baseUrl);
+                StepExecutionResult stepResult = executeStep(session.page, step, session.config, session.baseUrl, session.variableResolver);
                 stepResults.add(stepResult);
 
                 if (!stepResult.isSuccess()) {
@@ -373,9 +375,9 @@ public class PlaywrightExecutorImpl implements PlaywrightExecutor {
     }
 
     /**
-     * 执行单个步骤
+     * 执行单个步骤（带变量解析器）
      */
-    private StepExecutionResult executeStep(Page page, TestStepWithSelectors step, ExecutionConfig config, String baseUrl) {
+    private StepExecutionResult executeStep(Page page, TestStepWithSelectors step, ExecutionConfig config, String baseUrl, VariableResolver variableResolver) {
         long startTime = System.currentTimeMillis();
 
         try {
@@ -384,13 +386,24 @@ public class PlaywrightExecutorImpl implements PlaywrightExecutor {
             String value = step.getValue();
             List<String> fallbackSelectors = step.getFallbackSelectors();
 
-            log.debug("执行步骤: {} - {}", step.getStepNumber(), action);
+            // 解析变量（value 和 selector 中的 ${...} 占位符）
+            String resolvedValue = variableResolver.resolve(value);
+            String resolvedSelector = variableResolver.resolve(selector);
+
+            log.info("【执行步骤】步骤{}: action={}, selector={}, value={}",
+                    step.getStepNumber(), action, selector, value);
+            if (!resolvedValue.equals(value)) {
+                log.info("【变量解析】value: {} -> {}", value, resolvedValue);
+            }
+            if (!resolvedSelector.equals(selector)) {
+                log.info("【变量解析】selector: {} -> {}", selector, resolvedSelector);
+            }
 
             switch (action.toLowerCase()) {
                 case "navigate":
                     // 处理相对路径：如果value不是完整URL，则拼接baseUrl
-                    String targetUrl = value;
-                    if (value != null && !value.isEmpty() && !value.startsWith("http://") && !value.startsWith("https://")) {
+                    String targetUrl = resolvedValue;
+                    if (resolvedValue != null && !resolvedValue.isEmpty() && !resolvedValue.startsWith("http://") && !resolvedValue.startsWith("https://")) {
                         // 如果没有传入baseUrl，尝试从当前页面URL提取
                         if (baseUrl == null || baseUrl.isEmpty()) {
                             String currentUrl = page.url();
@@ -401,59 +414,169 @@ public class PlaywrightExecutorImpl implements PlaywrightExecutor {
                         }
 
                         if (baseUrl != null && !baseUrl.isEmpty()) {
-                            targetUrl = baseUrl + (value.startsWith("/") ? "" : "/") + value;
-                            log.info("转换相对路径: {} -> {}", value, targetUrl);
+                            targetUrl = baseUrl + (resolvedValue.startsWith("/") ? "" : "/") + resolvedValue;
+                            log.info("转换相对路径: {} -> {}", resolvedValue, targetUrl);
                         } else {
-                            throw new RuntimeException("无法导航到相对路径 '" + value + "'，因为baseUrl未设置且无法从当前页面提取。请确保先导航到一个完整URL。");
+                            throw new RuntimeException("无法导航到相对路径 '" + resolvedValue + "'，因为baseUrl未设置且无法从当前页面提取。请确保先导航到一个完整URL。");
                         }
                     }
+                    log.info("【执行】正在导航到: {}", targetUrl);
                     page.navigate(targetUrl, new Page.NavigateOptions().setWaitUntil(WaitUntilState.NETWORKIDLE));
+                    String finalUrl = page.url();
+                    log.info("【执行】导航完成，当前页面: {}", finalUrl);
                     break;
 
                 case "click":
-                    if (selector != null && !selector.isEmpty()) {
-                        page.click(selector, new Page.ClickOptions().setTimeout(config.getTimeout()));
+                    if (resolvedSelector != null && !resolvedSelector.isEmpty()) {
+                        log.info("【执行】正在点击元素: {}", resolvedSelector);
+                        page.click(resolvedSelector, new Page.ClickOptions().setTimeout(config.getTimeout()));
+                        log.info("【执行】点击成功");
                     } else {
                         throw new RuntimeException("点击操作缺少选择器");
                     }
                     break;
 
                 case "fill":
-                    if (selector != null && !selector.isEmpty()) {
-                        page.fill(selector, value);
+                    if (resolvedSelector != null && !resolvedSelector.isEmpty()) {
+                        log.info("【执行】正在填充输入框: selector={}, value={}", resolvedSelector, resolvedValue);
+                        page.fill(resolvedSelector, resolvedValue);
+                        log.info("【执行】填充成功");
+
+                        // 变量提取
+                        if (step.getExtractAs() != null && !step.getExtractAs().isEmpty()) {
+                            variableResolver.extractVariable(step.getExtractAs(), resolvedValue);
+                        }
                     } else {
                         throw new RuntimeException("填充操作缺少选择器");
                     }
                     break;
 
                 case "assert":
-                    if (selector != null && !selector.isEmpty()) {
-                        page.waitForSelector(selector, new Page.WaitForSelectorOptions().setTimeout(config.getTimeout()));
+                    log.info("【执行】正在断言元素存在: {}", resolvedSelector);
+                    if (resolvedSelector != null && !resolvedSelector.isEmpty()) {
+                        page.waitForSelector(resolvedSelector, new Page.WaitForSelectorOptions().setTimeout(config.getTimeout()));
+                        log.info("【执行】断言成功，元素存在");
+                    } else {
+                        throw new RuntimeException("断言操作缺少选择器");
+                    }
+                    break;
+
+                case "assert_not_exists":
+                    log.info("【执行】正在断言元素不存在: {}", resolvedSelector);
+                    if (resolvedSelector != null && !resolvedSelector.isEmpty()) {
+                        try {
+                            page.waitForSelector(resolvedSelector, new Page.WaitForSelectorOptions().setTimeout(3000));
+                            throw new RuntimeException("元素不应该存在，但找到了: " + resolvedSelector);
+                        } catch (Exception e) {
+                            if (e.getMessage().contains("Timeout")) {
+                                log.info("【执行】断言成功，元素不存在");
+                            } else {
+                                throw e;
+                            }
+                        }
+                    } else {
+                        throw new RuntimeException("断言操作缺少选择器");
+                    }
+                    break;
+
+                case "assert_text":
+                    log.info("【执行】正在断言页面包含文本: {}", resolvedValue);
+                    if (resolvedValue != null && !resolvedValue.isEmpty()) {
+                        // 等待一下让异步内容出现
+                        try {
+                            page.waitForTimeout(500);
+                        } catch (Exception e) {
+                            // 忽略
+                        }
+
+                        String pageContent = page.content();
+                        if (!pageContent.contains(resolvedValue)) {
+                            throw new RuntimeException("页面不包含文本: " + resolvedValue);
+                        }
+                        log.info("【执行】断言成功，页面包含文本");
+                    } else {
+                        throw new RuntimeException("断言操作缺少value");
+                    }
+                    break;
+
+                case "assert_not_text":
+                    log.info("【执行】正在断言页面不包含文本: {}", resolvedValue);
+                    if (resolvedValue != null && !resolvedValue.isEmpty()) {
+                        // 等待一下让异步内容出现
+                        try {
+                            page.waitForTimeout(500);
+                        } catch (Exception e) {
+                            // 忽略
+                        }
+
+                        String pageContent = page.content();
+                        if (pageContent.contains(resolvedValue)) {
+                            throw new RuntimeException("页面不应该包含文本，但找到了: " + resolvedValue);
+                        }
+                        log.info("【执行】断言成功，页面不包含文本");
+                    } else {
+                        throw new RuntimeException("断言操作缺少value");
+                    }
+                    break;
+
+                case "assert_visible":
+                    log.info("【执行】正在断言元素可见: {}", resolvedSelector);
+                    if (resolvedSelector != null && !resolvedSelector.isEmpty()) {
+                        page.waitForSelector(resolvedSelector, new Page.WaitForSelectorOptions().setTimeout(config.getTimeout()));
+                        // 检查元素是否可见
+                        Boolean isVisible = page.locator(resolvedSelector).isVisible();
+                        if (!isVisible) {
+                            throw new RuntimeException("元素存在但不可见: " + resolvedSelector);
+                        }
+                        log.info("【执行】断言成功，元素可见");
+                    } else {
+                        throw new RuntimeException("断言操作缺少选择器");
+                    }
+                    break;
+
+                case "assert_hidden":
+                    log.info("【执行】正在断言元素隐藏: {}", resolvedSelector);
+                    if (resolvedSelector != null && !resolvedSelector.isEmpty()) {
+                        page.waitForSelector(resolvedSelector, new Page.WaitForSelectorOptions().setTimeout(3000));
+                        // 检查元素是否隐藏
+                        Boolean isVisible = page.locator(resolvedSelector).isVisible();
+                        if (isVisible) {
+                            throw new RuntimeException("元素应该是隐藏的，但可见: " + resolvedSelector);
+                        }
+                        log.info("【执行】断言成功，元素隐藏");
                     } else {
                         throw new RuntimeException("断言操作缺少选择器");
                     }
                     break;
 
                 case "assert_url":
-                    if (value != null && !value.isEmpty()) {
+                    log.info("【执行】正在断言URL包含: {}", resolvedValue);
+                    if (resolvedValue != null && !resolvedValue.isEmpty()) {
                         String currentUrl = page.url();
-                        if (!currentUrl.contains(value)) {
-                            throw new RuntimeException("URL断言失败: 当前URL " + currentUrl + " 不包含 " + value);
+                        log.info("【执行】当前URL: {}", currentUrl);
+                        if (!currentUrl.contains(resolvedValue)) {
+                            throw new RuntimeException("URL断言失败: 当前URL " + currentUrl + " 不包含 " + resolvedValue);
                         }
+                        log.info("【执行】URL断言成功");
                     }
                     break;
 
                 case "wait":
-                    if (selector != null && !selector.isEmpty()) {
-                        page.waitForSelector(selector, new Page.WaitForSelectorOptions().setTimeout(config.getTimeout()));
+                    log.info("【执行】正在等待: {}ms", resolvedValue);
+                    if (resolvedSelector != null && !resolvedSelector.isEmpty()) {
+                        page.waitForSelector(resolvedSelector, new Page.WaitForSelectorOptions().setTimeout(config.getTimeout()));
                     } else {
-                        page.waitForTimeout(value != null ? Long.parseLong(value) : 1000);
+                        long waitTime = resolvedValue != null ? Long.parseLong(resolvedValue) : 1000;
+                        page.waitForTimeout(waitTime);
+                        log.info("【执行】等待完成");
                     }
                     break;
 
                 case "select":
-                    if (selector != null && !selector.isEmpty()) {
-                        page.selectOption(selector, value);
+                    log.info("【执行】正在选择下拉选项: selector={}, value={}", resolvedSelector, resolvedValue);
+                    if (resolvedSelector != null && !resolvedSelector.isEmpty()) {
+                        selectOption(page, resolvedSelector, resolvedValue, config.getTimeout());
+                        log.info("【执行】选择成功");
                     } else {
                         throw new RuntimeException("选择操作缺少选择器");
                     }
@@ -471,6 +594,14 @@ public class PlaywrightExecutorImpl implements PlaywrightExecutor {
             long duration = System.currentTimeMillis() - startTime;
             return new StepExecutionResult(step.getStepNumber(), false, "FAILED", duration, null, e.getMessage());
         }
+    }
+
+    /**
+     * 执行单个步骤（兼容旧版本，不使用变量解析器）
+     */
+    private StepExecutionResult executeStep(Page page, TestStepWithSelectors step, ExecutionConfig config, String baseUrl) {
+        // 使用空的变量解析器
+        return executeStep(page, step, config, baseUrl, new VariableResolver());
     }
 
     /**
@@ -493,20 +624,94 @@ public class PlaywrightExecutorImpl implements PlaywrightExecutor {
         List<InteractiveElement> elements = new ArrayList<>();
 
         try {
-            // 提取所有input元素
+            // 提取表单元素
             elements.addAll(extractElements(page, "input"));
             elements.addAll(extractElements(page, "button"));
             elements.addAll(extractElements(page, "select"));
             elements.addAll(extractElements(page, "textarea"));
+
+            // 提取链接和导航元素
             elements.addAll(extractElements(page, "a"));
 
-            log.debug("提取到 {} 个可交互元素", elements.size());
+            // 提取菜单相关元素（用于Element UI等框架）
+            elements.addAll(extractElementsWithFilter(page, "li"));
+            elements.addAll(extractElementsWithFilter(page, "div"));
+
+            log.info("【页面快照】提取到 {} 个可交互元素", elements.size());
 
         } catch (Exception e) {
             log.error("提取可交互元素失败", e);
         }
 
         return elements;
+    }
+
+    /**
+     * 提取指定标签的元素（带过滤）
+     * 只提取有意义的元素（有类名、ID、data-*属性或role属性）
+     */
+    private List<InteractiveElement> extractElementsWithFilter(Page page, String tagName) {
+        List<InteractiveElement> result = new ArrayList<>();
+
+        try {
+            List<ElementHandle> handles = page.querySelectorAll(tagName);
+
+            for (ElementHandle handle : handles) {
+                InteractiveElement element = extractElementInfo(handle);
+                if (element != null && isMeaningfulElement(element)) {
+                    result.add(element);
+                }
+            }
+
+        } catch (Exception e) {
+            log.warn("提取{}元素失败", tagName, e);
+        }
+
+        return result;
+    }
+
+    /**
+     * 判断元素是否有意义（值得包含在快照中）
+     */
+    private boolean isMeaningfulElement(InteractiveElement element) {
+        // 有ID
+        if (element.getId() != null && !element.getId().isEmpty()) {
+            return true;
+        }
+
+        // 有类名（排除纯数字或动态ID类名）
+        if (element.getClassName() != null && !element.getClassName().isEmpty()) {
+            String className = element.getClassName();
+            // 排除动态ID类名（如 el-id-5537-2, ant-123）
+            if (!className.matches(".*\\bel-id-\\d+.*") &&
+                !className.matches(".*\\bant-\\d+.*") &&
+                !className.matches("^\\d+$")) {
+                return true;
+            }
+        }
+
+        // 有data-*测试属性
+        if (element.getDataTestId() != null || element.getDataTest() != null ||
+            element.getDataAutomation() != null) {
+            return true;
+        }
+
+        // 有role属性
+        if (element.getRole() != null && !element.getRole().isEmpty()) {
+            return true;
+        }
+
+        // 有aria-label
+        if (element.getAriaLabel() != null && !element.getAriaLabel().isEmpty()) {
+            return true;
+        }
+
+        // li元素通常是有意义的（菜单项）
+        if ("li".equals(element.getTagName())) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -654,6 +859,106 @@ public class PlaywrightExecutorImpl implements PlaywrightExecutor {
      */
     private String escapeText(String text) {
         return text.replace("'", "\\'");
+    }
+
+    /**
+     * 选择下拉选项（支持原生select和自定义下拉框）
+     */
+    private void selectOption(Page page, String selector, String value, int timeout) throws Exception {
+        try {
+            // 首先尝试使用原生的 selectOption 方法（针对原生 <select> 元素）
+            page.selectOption(selector, value);
+            log.info("【select】使用原生selectOption成功");
+        } catch (Exception e) {
+            // 如果失败，说明可能是自定义下拉框（如 Element UI 的 el-select）
+            log.info("【select】元素不是原生select，尝试自定义下拉框操作: {}", e.getMessage());
+
+            // 自定义下拉框操作流程：
+            // 1. 点击下拉框打开选项列表
+            // 2. 等待选项列表出现
+            // 3. 点击要选择的选项
+
+            // 1. 点击下拉框
+            log.info("【select】步骤1: 点击下拉框打开选项列表");
+            page.click(selector, new Page.ClickOptions().setTimeout(timeout));
+
+            // 2. 等待一下让选项列表展开
+            try {
+                page.waitForTimeout(500);
+            } catch (Exception ex) {
+                // 忽略
+            }
+
+            // 3. 尝试多种方式查找并点击选项
+            String targetValue = value;
+            boolean needRandomSelection = (targetValue == null || targetValue.trim().isEmpty());
+
+            // 如果value为空，随机选择一个选项
+            if (needRandomSelection) {
+                log.info("【select】value为空，将随机选择一个选项");
+                // 获取所有可用的下拉选项
+                try {
+                    List<ElementHandle> options = page.querySelectorAll("li.el-select-dropdown__item");
+                    if (options.isEmpty()) {
+                        options = page.querySelectorAll(".el-select-dropdown li");
+                    }
+                    if (!options.isEmpty()) {
+                        // 随机选择一个选项
+                        java.util.Random random = new java.util.Random();
+                        int randomIndex = random.nextInt(options.size());
+                        ElementHandle selectedOption = options.get(randomIndex);
+                        targetValue = selectedOption.innerText();
+                        log.info("【select】随机选择选项 [{}/{}]: {}", randomIndex + 1, options.size(), targetValue);
+                    } else {
+                        log.warn("【select】未找到可用的下拉选项");
+                        return;
+                    }
+                } catch (Exception ex) {
+                    log.warn("【select】获取下拉选项失败: {}", ex.getMessage());
+                    return;
+                }
+            }
+
+            // 方式1: 查找 li 元素（Element UI 选项通常是 li）
+            try {
+                String optionSelector = String.format("li:has-text('%s')", targetValue);
+                log.info("【select】步骤2: 尝试通过 li 查找选项: {}", optionSelector);
+                page.waitForSelector(optionSelector, new Page.WaitForSelectorOptions().setTimeout(timeout));
+                page.click(optionSelector, new Page.ClickOptions().setTimeout(timeout));
+                log.info("【select】通过 li 元素选择成功");
+                return;
+            } catch (Exception ex) {
+                log.info("【select】通过 li 元素选择失败: {}", ex.getMessage());
+            }
+
+            // 方式2: 查找 .el-select-dropdown__item 类（Element UI 特有）
+            try {
+                String optionSelector = String.format(".el-select-dropdown__item:has-text('%s')", targetValue);
+                log.info("【select】步骤2: 尝试通过 Element UI 类名查找选项: {}", optionSelector);
+                page.waitForSelector(optionSelector, new Page.WaitForSelectorOptions().setTimeout(timeout));
+                page.click(optionSelector, new Page.ClickOptions().setTimeout(timeout));
+                log.info("【select】通过 Element UI 类名选择成功");
+                return;
+            } catch (Exception ex) {
+                log.info("【select】通过 Element UI 类名选择失败: {}", ex.getMessage());
+            }
+
+            // 方式3: 在下拉框的父级容器内查找选项
+            try {
+                // 假设下拉框后面跟着下拉面板
+                String optionSelector = String.format(".el-select-dropdown li:has-text('%s')", targetValue);
+                log.info("【select】步骤2: 尝试在下拉面板内查找选项: {}", optionSelector);
+                page.waitForSelector(optionSelector, new Page.WaitForSelectorOptions().setTimeout(timeout));
+                page.click(optionSelector, new Page.ClickOptions().setTimeout(timeout));
+                log.info("【select】通过下拉面板选择成功");
+                return;
+            } catch (Exception ex) {
+                log.info("【select】通过下拉面板选择失败: {}", ex.getMessage());
+            }
+
+            // 如果所有方式都失败，抛出异常
+            throw new RuntimeException("无法选择下拉选项 '" + targetValue + "'，已尝试所有可能的选择方式");
+        }
     }
 
     /**

@@ -129,6 +129,10 @@
             <input v-model="newProject.code" type="text" class="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-primary" placeholder="请输入项目代码（如：RA、ACMS）" required>
           </div>
           <div class="md:col-span-2">
+            <label class="block text-sm font-medium mb-1">目标URL <span class="text-red-500">*</span></label>
+            <input v-model="newProject.targetUrl" type="url" class="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-primary" placeholder="请输入目标URL（如：https://example.com）">
+          </div>
+          <div class="md:col-span-2">
             <label class="block text-sm font-medium mb-1">项目描述</label>
             <textarea v-model="newProject.description" class="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-primary min-h-[80px]" placeholder="请输入项目描述（选填）"></textarea>
           </div>
@@ -161,6 +165,7 @@ const filters = ref({
 const newProject = ref({
   name: '',
   code: '',
+  targetUrl: '',
   description: ''
 })
 
@@ -187,6 +192,7 @@ const createProject = async () => {
     newProject.value = {
       name: '',
       code: '',
+      targetUrl: '',
       description: ''
     }
     showModal.value = false

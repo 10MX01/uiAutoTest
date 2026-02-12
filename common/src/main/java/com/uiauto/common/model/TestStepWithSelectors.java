@@ -53,6 +53,12 @@ public class TestStepWithSelectors {
     private String value;
 
     /**
+     * 变量提取名
+     * 如果不为空，将value解析后的值保存为变量，供后续步骤使用
+     */
+    private String extractAs;
+
+    /**
      * 步骤描述
      */
     private String description;

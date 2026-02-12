@@ -1,15 +1,17 @@
 package com.uiauto.testcase.vo;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.uiauto.common.ApiResponse;
 import lombok.Data;
 
+import java.time.LocalDateTime;
 import java.util.Date;
 
 /**
  * 测试记录响应DTO
  */
 @Data
-public class TestRecordResponse {
+public class TestRecordResponse{
     /**
      * 记录ID
      */
@@ -64,7 +66,7 @@ public class TestRecordResponse {
      * 创建时间
      */
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
-    private Date createdTime;
+    private LocalDateTime createdTime;
 
     /**
      * 无参构造函数
@@ -78,7 +80,7 @@ public class TestRecordResponse {
     public TestRecordResponse(Long uniqueId, Long projectId, String projectName,
                               String caseNumber, String caseName,
                               String executionUrl, String status, Long duration,
-                              Long executedBy, String executorName, Date createdTime) {
+                              Long executedBy, String executorName, LocalDateTime createdTime) {
         this.uniqueId = uniqueId;
         this.projectId = projectId;
         this.projectName = projectName;

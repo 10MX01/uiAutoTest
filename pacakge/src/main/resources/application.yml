@@ -18,7 +18,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: none  # 不自动创建表，使用SQL脚本手动创建
-    show-sql: true    # 开发环境显示SQL
+    show-sql: false    # 开发环境显示SQL
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect

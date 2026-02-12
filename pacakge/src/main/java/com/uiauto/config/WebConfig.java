@@ -1,16 +1,24 @@
 package com.uiauto.config;
 
+import com.uiauto.testcase.interceptor.JwtInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
  * Web 配置类
- * 配置静态资源映射和跨域支持
+ * 配置静态资源映射、跨域支持和JWT拦截器
  */
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
+
+    private final JwtInterceptor jwtInterceptor;
+
+    public WebConfig(JwtInterceptor jwtInterceptor) {
+        this.jwtInterceptor = jwtInterceptor;
+    }
 
     /**
      * 配置静态资源映射
@@ -40,5 +48,23 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedHeaders("*")
                 .allowCredentials(true)
                 .maxAge(3600);
+    }
+
+    /**
+     * 配置拦截器
+     */
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(jwtInterceptor)
+                .addPathPatterns("/**")  // 拦截所有路径
+                .excludePathPatterns(
+                        "/users/login",           // 登录接口
+                        "/users/generate-password", // 临时密码生成接口
+                        "/assets/**",              // 静态资源
+                        "/static/**",
+                        "/index.html",
+                        "/favicon.ico",
+                        "/error"
+                );
     }
 }

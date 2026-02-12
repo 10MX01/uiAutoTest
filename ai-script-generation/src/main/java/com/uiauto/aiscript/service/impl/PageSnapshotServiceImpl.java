@@ -99,20 +99,94 @@ public class PageSnapshotServiceImpl implements PageSnapshotService {
         List<InteractiveElement> elements = new ArrayList<>();
 
         try {
-            // 提取所有input元素
+            // 提取表单元素
             elements.addAll(extractElements(page, "input"));
             elements.addAll(extractElements(page, "button"));
             elements.addAll(extractElements(page, "select"));
             elements.addAll(extractElements(page, "textarea"));
+
+            // 提取链接和导航元素
             elements.addAll(extractElements(page, "a"));
 
-            log.debug("提取到 {} 个可交互元素", elements.size());
+            // 提取菜单相关元素（用于Element UI等框架）
+            elements.addAll(extractElementsWithFilter(page, "li"));
+            elements.addAll(extractElementsWithFilter(page, "div"));
+
+            log.info("提取到 {} 个可交互元素", elements.size());
 
         } catch (Exception e) {
             log.error("提取可交互元素失败", e);
         }
 
         return elements;
+    }
+
+    /**
+     * 提取指定标签的元素（带过滤）
+     * 只提取有意义的元素（有类名、ID、data-*属性或role属性）
+     */
+    private List<InteractiveElement> extractElementsWithFilter(Page page, String tagName) {
+        List<InteractiveElement> result = new ArrayList<>();
+
+        try {
+            List<ElementHandle> handles = page.querySelectorAll(tagName);
+
+            for (ElementHandle handle : handles) {
+                InteractiveElement element = extractElementInfo(handle);
+                if (element != null && isMeaningfulElement(element)) {
+                    result.add(element);
+                }
+            }
+
+        } catch (Exception e) {
+            log.warn("提取{}元素失败", tagName, e);
+        }
+
+        return result;
+    }
+
+    /**
+     * 判断元素是否有意义（值得包含在快照中）
+     */
+    private boolean isMeaningfulElement(InteractiveElement element) {
+        // 有ID
+        if (element.getId() != null && !element.getId().isEmpty()) {
+            return true;
+        }
+
+        // 有类名（排除纯数字或动态ID类名）
+        if (element.getClassName() != null && !element.getClassName().isEmpty()) {
+            String className = element.getClassName();
+            // 排除动态ID类名（如 el-id-5537-2, ant-123）
+            if (!className.matches(".*\\bel-id-\\d+.*") &&
+                !className.matches(".*\\bant-\\d+.*") &&
+                !className.matches("^\\d+$")) {
+                return true;
+            }
+        }
+
+        // 有data-*测试属性
+        if (element.getDataTestId() != null || element.getDataTest() != null ||
+            element.getDataAutomation() != null) {
+            return true;
+        }
+
+        // 有role属性
+        if (element.getRole() != null && !element.getRole().isEmpty()) {
+            return true;
+        }
+
+        // 有aria-label
+        if (element.getAriaLabel() != null && !element.getAriaLabel().isEmpty()) {
+            return true;
+        }
+
+        // li元素通常是有意义的（菜单项）
+        if ("li".equals(element.getTagName())) {
+            return true;
+        }
+
+        return false;
     }
 
     /**

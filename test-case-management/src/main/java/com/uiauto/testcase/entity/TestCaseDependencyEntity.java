@@ -2,11 +2,8 @@ package com.uiauto.testcase.entity;
 
 import com.uiauto.common.BaseEntity;
 import javax.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.NoArgsConstructor;
+
+import lombok.*;
 
 /**
  * 测试用例依赖关系实体类
@@ -14,8 +11,10 @@ import lombok.NoArgsConstructor;
  */
 @Entity
 @Table(name = "test_case_dependencies")
-@Data
-@EqualsAndHashCode(callSuper = true)
+@Getter
+@Setter
+@EqualsAndHashCode(callSuper = true, exclude = {"testCase", "prerequisite"})
+@ToString(callSuper = true, exclude = {"testCase", "prerequisite"})
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -24,13 +23,13 @@ public class TestCaseDependencyEntity extends BaseEntity {
     /**
      * 当前测试用例ID（后置用例）
      */
-    @Column(name = "test_case_id", insertable = false, updatable = false)
+    @Column(name = "test_case_id")
     private Long testCaseId;
 
     /**
      * 前置测试用例ID
      */
-    @Column(name = "prerequisite_id", insertable = false, updatable = false)
+    @Column(name = "prerequisite_id")
     private Long prerequisiteId;
 
     /**
@@ -45,6 +44,7 @@ public class TestCaseDependencyEntity extends BaseEntity {
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "test_case_id", insertable = false, updatable = false)
+    @com.fasterxml.jackson.annotation.JsonBackReference
     private TestCaseEntity testCase;
 
     /**
@@ -52,6 +52,7 @@ public class TestCaseDependencyEntity extends BaseEntity {
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "prerequisite_id", insertable = false, updatable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private TestCaseEntity prerequisite;
 
     /**
